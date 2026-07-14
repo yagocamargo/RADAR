@@ -1,0 +1,27 @@
+{
+  "name": "Radar Dev Environment",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-22.04",
+
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest"
+    }
+  },
+
+  "forwardPorts": [3000, 8000],
+
+  "portsAttributes": {
+    "3000": {
+      "label": "Radar - Frontend",
+      "visibility": "public",
+      "onAutoForward": "notify"
+    },
+    "8000": {
+      "label": "Radar - Backend API",
+      "visibility": "public",
+      "onAutoForward": "silent"
+    }
+  },
+
+  "postStartCommand": "bash scripts/codespace-start.sh"
+}
