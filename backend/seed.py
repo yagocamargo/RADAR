@@ -26,6 +26,7 @@ from app.models.company import Company
 from app.models.contract import Contract, ContractStatus
 from app.models.signal import MarketSignal, SignalType
 from app.models.alert import Alert, AlertPriority, AlertStatus
+from app.services.aggregates import recompute_company_aggregates
 
 SEGMENT_NAMES = [
     "Tributos", "Folha de Pagamento", "Licitacoes", "Compras Publicas",
@@ -107,9 +108,16 @@ async def seed_companies(db, segments):
                 uf=c["uf"],
                 cidade=c["cidade"],
                 endereco=f"Centro, {c['cidade']} - {c['uf']}",
-                municipios_atendidos=random.randint(20, 450),
-                contratos_ativos=random.randint(3, 60),
-                valor_total_contratos=round(random.uniform(200_000, 15_000_000), 2),
+                # municipios_atendidos e contratos_ativos NAO sao mais gerados
+                # aleatoriamente aqui. Eles sao recalculados a partir dos
+                # contratos reais (ver seed_contracts + recompute_company_aggregates
+                # logo apos), para que a interface sempre mostre numeros
+                # consistentes com a tabela de contratos.
+                municipios_atendidos=0,
+                contratos_ativos=0,
+                # valor_total_contratos tambem e recalculado a partir dos
+                # contratos reais (SUM), pelo mesmo motivo acima.
+                valor_total_contratos=0,
                 vagas_abertas_30d=random.randint(0, 18),
                 vagas_abertas_90d=random.randint(5, 40),
                 relevance_score=round(random.uniform(0.3, 0.98), 3),
@@ -233,6 +241,11 @@ async def main():
 
         print("Criando contratos publicos de exemplo...")
         await seed_contracts(db, companies)
+
+        print("Recalculando contratos_ativos e municipios_atendidos a partir dos contratos criados...")
+        for company in companies.values():
+            await recompute_company_aggregates(db, company.id)
+        await db.commit()
 
         print("Criando sinais de mercado de exemplo...")
         await seed_signals(db, companies)

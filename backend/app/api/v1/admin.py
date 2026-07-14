@@ -20,6 +20,7 @@ from app.tasks.agents import (
     task_alerts,
     task_pncp_collect,
 )
+from app.services.aggregates import recompute_all_aggregates
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -93,3 +94,19 @@ async def trigger_alerts(current_user=Depends(require_admin_or_manager)):
 async def trigger_pncp_collect(current_user=Depends(require_admin_or_manager)):
     result = task_pncp_collect.delay()
     return TriggerAgentResponse(task_id=result.id, status="disparado", agent="coleta_pncp")
+
+
+@router.post("/recalcular-agregados")
+async def recalcular_agregados(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(require_admin_or_manager),
+):
+    """
+    Recalcula imediatamente contratos_ativos, municipios_atendidos e
+    valor_total_contratos de TODAS as empresas a partir da tabela real de
+    contratos. Diferente dos agentes acima, roda de forma sincrona (nao
+    depende do Celery), pensado para uso pontual/manual.
+    """
+    total = await recompute_all_aggregates(db)
+    await db.commit()
+    return {"ok": True, "empresas_recalculadas": total}

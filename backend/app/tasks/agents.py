@@ -23,6 +23,7 @@ from app.models.alert import Alert, AlertPriority, AlertStatus
 from app.models.monitoring import Monitoring
 from app.models.user import User
 from app.services import cnpj_service, pncp_service
+from app.services.aggregates import recompute_company_aggregates, recompute_all_aggregates
 
 
 def _run_async(coro):
@@ -56,11 +57,18 @@ async def _enrichment_job():
 async def _monitoring_job():
     session_factory, engine = _get_session_factory()
     async with session_factory() as db:
+        # Primeiro, recalcula contratos_ativos e municipios_atendidos a partir
+        # da tabela real de contratos (fonte de verdade) — corrige o problema
+        # de esses campos ficarem desatualizados/inventados.
+        await recompute_all_aggregates(db)
+        await db.commit()
+
         result = await db.execute(select(Company))
         companies = result.scalars().all()
 
         for company in companies:
             # Recalcula growth_signal com base em vagas recentes e contratos ativos
+            # (agora usando o valor de contratos_ativos ja recalculado acima)
             jobs_factor = min((company.vagas_abertas_30d or 0) / 10.0, 1.0)
             contracts_factor = min((company.contratos_ativos or 0) / 15.0, 1.0)
             company.growth_signal = round(min((jobs_factor * 0.6 + contracts_factor * 0.4), 1.0), 3)
@@ -114,6 +122,7 @@ async def _pncp_collect_job():
         companies = result.scalars().all()
 
         collected = 0
+        touched_company_ids = set()
         for company in companies[:15]:  # respeita rate limit do PNCP
             contracts_data = await pncp_service.fetch_contracts_by_cnpj(company.cnpj)
             for c in contracts_data:
@@ -137,10 +146,21 @@ async def _pncp_collect_job():
                 )
                 db.add(contract)
                 collected += 1
+                touched_company_ids.add(company.id)
 
+        # Grava os contratos novos antes de recalcular os agregados, para que
+        # a contagem abaixo ja enxergue as linhas recem-inseridas.
         await db.commit()
+
+        # Corrige contratos_ativos e municipios_atendidos das empresas que
+        # receberam contratos novos nesta execucao, usando a tabela real
+        # de contratos como fonte de verdade (nao mais numero solto/aleatorio).
+        for company_id in touched_company_ids:
+            await recompute_company_aggregates(db, company_id)
+        await db.commit()
+
     await engine.dispose()
-    return {"contratos_coletados": collected}
+    return {"contratos_coletados": collected, "empresas_atualizadas": len(touched_company_ids)}
 
 
 @celery_app.task(name="app.tasks.agents.task_enrichment")

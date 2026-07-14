@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Database, Users, Bell, Building2, FileSignature, Trash2, Play } from "lucide-react";
+import { Database, Users, Bell, Building2, FileSignature, Trash2, Play, RefreshCw } from "lucide-react";
 import ProtectedShell from "@/components/ProtectedShell";
 import MetricCard from "@/components/MetricCard";
 import { api, ApiError } from "@/lib/api";
@@ -23,12 +23,12 @@ const AGENTS = [
   { key: "alertas", label: "Alertas", endpoint: "/api/v1/admin/agentes/alertas" },
   { key: "pncp", label: "Coleta PNCP", endpoint: "/api/v1/admin/agentes/pncp" },
 ];
-
 export default function AdminPage() {
   const [data, setData] = useState<AdminStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
 
   function load() {
     api
@@ -62,6 +62,19 @@ export default function AdminPage() {
     load();
   }
 
+  async function recalculateAggregates() {
+    setRecalculating(true);
+    try {
+      const res = await api.post("/api/v1/admin/recalcular-agregados");
+      setMessage(`Agregados recalculados para ${res.empresas_recalculadas} empresas (contratos ativos, municipios atendidos e valor total, a partir da tabela de contratos).`);
+      load();
+    } catch {
+      setMessage("Falha ao recalcular agregados.");
+    } finally {
+      setRecalculating(false);
+    }
+  }
+
   if (message && !data) {
     return (
       <ProtectedShell>
@@ -92,6 +105,24 @@ export default function AdminPage() {
           {message && (
             <p className="text-sm bg-accent/10 text-accent rounded-md px-3 py-2">{message}</p>
           )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card p-5">
+              <h2 className="text-sm font-semibold mb-1">Recalcular dados agregados</h2>
+              <p className="text-xs text-muted mb-4">
+                Recalcula contratos ativos, municipios atendidos e valor total das empresas
+                a partir da tabela real de contratos (nao usa mais numeros soltos/aleatorios).
+              </p>
+              <button
+                onClick={recalculateAggregates}
+                disabled={recalculating}
+                className="flex items-center gap-2 text-sm px-3 py-2 rounded-md bg-accent text-accent-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
+              >
+                <RefreshCw size={14} className={recalculating ? "animate-spin" : ""} />
+                {recalculating ? "Recalculando..." : "Recalcular agora"}
+              </button>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="card p-5">
